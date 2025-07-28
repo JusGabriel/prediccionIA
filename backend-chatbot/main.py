@@ -6,7 +6,6 @@ from bson import ObjectId
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
 import numpy as np
-import random
 
 # Inicializar la app
 app = FastAPI()
@@ -48,25 +47,37 @@ respuestas = [
     "Tienen una validez de 6 meses desde la fecha de finalización de las prácticas o de emisión del certificado."
 ]
 
-# TF-IDF para preguntas
+# TF-IDF para preguntas frecuentes
 vectorizer = TfidfVectorizer()
 X = vectorizer.fit_transform(preguntas)
 
-# TF-IDF y modelo simulado para análisis de descripciones
-descripcion_ejemplos = [
-    "Realizaré prácticas en una empresa de desarrollo de software.",
-    "Participaré en una campaña de limpieza ambiental en mi comunidad.",
-    "Estoy trabajando como asistente en una empresa mientras estudio.",
-    "Me uniré a un proyecto social que ayuda a personas vulnerables.",
-    "Haré mis pasantías en el área de soporte técnico de una institución pública.",
-    "Trabajo medio tiempo como desarrollador en una startup."
+# Clasificación Modalidad: Entrenamiento de ejemplo
+descripciones_modalidad = [
+    "Voy a hacer prácticas en una empresa de telecomunicaciones.",
+    "Realicé una capacitación en seguridad informática.",
+    "Fui voluntario en una campaña de vacunación.",
+    "Voy a iniciar pasantías en una compañía de desarrollo de software.",
+    "Participé en una investigación de la universidad.",
+    "Estoy por empezar prácticas en el área administrativa de una empresa.",
+    "Fui representante estudiantil durante un semestre.",
+    "Voy a trabajar medio tiempo en una empresa de soporte técnico."
 ]
 
-areas = ["Desarrollo", "Vinculación", "Laboral", "Vinculación", "Redes", "Laboral"]
-vector_desc = TfidfVectorizer()
-X_desc = vector_desc.fit_transform(descripcion_ejemplos)
-modelo_area = LogisticRegression()
-modelo_area.fit(X_desc, areas)
+modalidades = [
+    "PPP",
+    "Convalidación",
+    "Convalidación",
+    "PPP",
+    "Convalidación",
+    "PPP",
+    "Convalidación",
+    "PPP"
+]
+
+vector_modalidad = TfidfVectorizer()
+X_modalidad = vector_modalidad.fit_transform(descripciones_modalidad)
+modelo_modalidad = LogisticRegression()
+modelo_modalidad.fit(X_modalidad, modalidades)
 
 # Modelos
 class Formulario(BaseModel):
@@ -88,20 +99,12 @@ def root():
 async def registrar_formulario(data: Formulario):
     form_dict = data.dict()
 
-    # Predicción del análisis inteligente
-    desc_vec = vector_desc.transform([form_dict["descripcion"]])
-    area_predicha = modelo_area.predict(desc_vec)[0]
-    complejidad = "Avanzado" if "red" in form_dict["descripcion"].lower() or "snmp" in form_dict["descripcion"].lower() else "Intermedio"
-    modalidad_recomendada = "Convalidación" if complejidad == "Avanzado" else "Práctica Pre-Profesional"
-    probabilidad = round(random.uniform(70, 95), 2)
+    # Predicción automática de modalidad
+    desc_vec = vector_modalidad.transform([form_dict["descripcion"]])
+    modalidad_predicha = modelo_modalidad.predict(desc_vec)[0]
+    form_dict["modalidad_predicha"] = modalidad_predicha
 
-    form_dict.update({
-        "area_profesional": area_predicha,
-        "complejidad": complejidad,
-        "modalidad_recomendada": modalidad_recomendada,
-        "probabilidad_aprobacion": probabilidad
-    })
-
+    # Insertar en MongoDB
     result = await formularios.insert_one(form_dict)
     form_dict["_id"] = str(result.inserted_id)
     return {"message": "Formulario recibido", "data": form_dict}
