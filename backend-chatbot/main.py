@@ -1,14 +1,15 @@
 from fastapi import FastAPI, Body, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-import uuid
 import motor.motor_asyncio
 from bson import ObjectId
 from sklearn.feature_extraction.text import TfidfVectorizer
+import numpy as np
 
+# Inicializar la app
 app = FastAPI()
 
-# CORS - permite cualquier origen (para desarrollo)
+# CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -17,82 +18,92 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# MongoDB config
-MONGO_URI = "mongodb://mongo:YvjDmHBINTcvxYWvLCzHaNJGmeBTjZWc@mongodb.railway.internal:27017"
+# Conexión MongoDB
+MONGO_URI = "mongodb://mongo:JqIXnWRvbqNLobljNLGYFcloiKymZfbf@mongodb.railway.internal:27017"
 client = motor.motor_asyncio.AsyncIOMotorClient(MONGO_URI)
 db = client.IA
-coleccion = db.conversacions
+formularios = db.formularios
+pendientes = db.aprendizaje_formulario
 
-# Modelo básico TF-IDF
+# Base de datos de preguntas frecuentes
+preguntas = [
+    "¿Cuántas horas necesito de prácticas laborales?",
+    "¿Cuáles son los requisitos para convalidar prácticas?",
+    "¿Dónde puedo hacer vinculación?",
+    "¿Qué hago si ya tengo tutor para mis prácticas?",
+    "¿Puedo hacer prácticas con familiares?",
+    "¿Qué documentos debo enviar para el registro de prácticas?",
+    "¿Cuánto tiempo de validez tienen los certificados de prácticas?",
+]
+
+respuestas = [
+    "Necesitas 240 horas de prácticas laborales y 96 de servicio comunitario (Tecnología Superior).",
+    "Debes enviar un correo con el formulario FCP-001A y certificado de actividad. La subdirección lo revisa y designa tutor.",
+    "Puedes hacer vinculación en entidades públicas o privadas que certifiquen las actividades y horas realizadas.",
+    "Debes escribirle directamente a tu tutor y seguir el procedimiento de registro de prácticas.",
+    "No puedes hacer prácticas en emprendimientos u organizaciones de familiares o compañeros de la EPN.",
+    "Debes subir un archivo PDF con la Carta de Aceptación y la Solicitud de Prácticas en el formulario de registro.",
+    "Tienen una validez de 6 meses desde la fecha de finalización de las prácticas o de emisión del certificado."
+]
+
+# TF-IDF
 vectorizer = TfidfVectorizer()
-preguntas = ["¿Cuál es tu nombre?", "¿Qué puedes hacer?", "¿Dónde estudias?"]
-respuestas = ["Soy un bot.", "Puedo responder preguntas.", "Estudio en ESPOL."]
 X = vectorizer.fit_transform(preguntas)
 
-class Mensaje(BaseModel):
-    rol: str
-    contenido: str
+# Modelo de formulario
+class Formulario(BaseModel):
+    nombre: str
+    cedula: str
+    carrera: str
+    modalidad: str
+    tipo_actividad: str
+    descripcion: str
+
+# Modelo de mensaje
+class Pregunta(BaseModel):
+    texto: str
 
 @app.get("/")
-def ping():
-    return {"message": "Servidor ON 🚀"}
+def root():
+    return {"message": "Servidor de predicción de prácticas activo"}
 
-@app.get("/conversaciones")
-async def obtener_conversaciones():
-    conversaciones = []
-    async for conv in coleccion.find({}, {"titulo": 1, "mensajes": 1}):
-        conv["_id"] = str(conv["_id"])
-        conversaciones.append(conv)
-    return conversaciones
+@app.post("/formulario/registro")
+async def registrar_formulario(data: Formulario):
+    form_dict = data.dict()
+    result = await formularios.insert_one(form_dict)
+    form_dict["_id"] = str(result.inserted_id)
+    return {"message": "Formulario recibido", "data": form_dict}
 
-@app.post("/conversaciones/nuevo")
-async def nueva_conversacion(primerMensaje: str = Body(..., embed=True)):
-    nueva = {
-        "titulo": primerMensaje[:30],
-        "mensajes": [{"rol": "Estudiante", "contenido": primerMensaje}]
-    }
-    resultado = await coleccion.insert_one(nueva)
-    nueva["_id"] = str(resultado.inserted_id)
-    return {"conversacion": nueva}
-
-@app.post("/conversaciones/{conv_id}/mensajes")
-async def agregar_mensaje(conv_id: str, mensaje: Mensaje):
-    res = await coleccion.update_one(
-        {"_id": ObjectId(conv_id)},
-        {"$push": {"mensajes": mensaje.dict()}}
-    )
-    if res.modified_count == 0:
-        raise HTTPException(status_code=404, detail="Conversación no encontrada")
-    return {"message": "Mensaje guardado"}
-
-@app.delete("/conversaciones/{conv_id}")
-async def eliminar_conversacion(conv_id: str):
-    res = await coleccion.delete_one({"_id": ObjectId(conv_id)})
-    if res.deleted_count == 0:
-        raise HTTPException(status_code=404, detail="Conversación no encontrada")
-    return {"message": "Conversación eliminada"}
-
-@app.post("/buscar")
-def buscar_similar(query: str = Body(..., embed=True)):
-    query_vec = vectorizer.transform([query])
+@app.post("/formulario/pregunta")
+async def responder_pregunta(pregunta: Pregunta):
+    texto = pregunta.texto
+    query_vec = vectorizer.transform([texto])
     similitudes = (X * query_vec.T).toarray().flatten()
 
-    if max(similitudes) < 0.1:
+    if np.max(similitudes) < 0.2:
+        await pendientes.insert_one({"pregunta": texto})
         return {
-            "respuesta": "No entiendo eso todavía 😅",
-            "necesita_aprendizaje": True,
-            "pregunta_original": query
+            "respuesta": "Lo siento, no tengo información suficiente sobre esa pregunta. Será enviada para revisión.",
+            "necesita_aprendizaje": True
         }
 
-    idx = similitudes.argmax()
+    idx = np.argmax(similitudes)
     return {
         "respuesta": respuestas[idx],
         "necesita_aprendizaje": False
     }
 
-if __name__ == "__main__":
-    import uvicorn
-    import os
+@app.get("/formularios")
+async def listar_formularios():
+    lista = []
+    async for form in formularios.find():
+        form["_id"] = str(form["_id"])
+        lista.append(form)
+    return lista
 
-    port = int(os.environ.get("PORT", 8080))
-    uvicorn.run("main:app", host="0.0.0.0", port=port)
+@app.delete("/formulario/{id_form}")
+async def eliminar_formulario(id_form: str):
+    res = await formularios.delete_one({"_id": ObjectId(id_form)})
+    if res.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Formulario no encontrado")
+    return {"message": "Formulario eliminado"}
