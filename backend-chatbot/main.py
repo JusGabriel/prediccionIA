@@ -4,7 +4,9 @@ from pydantic import BaseModel
 import motor.motor_asyncio
 from bson import ObjectId
 from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.linear_model import LogisticRegression
 import numpy as np
+import random
 
 # Inicializar la app
 app = FastAPI()
@@ -46,11 +48,27 @@ respuestas = [
     "Tienen una validez de 6 meses desde la fecha de finalización de las prácticas o de emisión del certificado."
 ]
 
-# TF-IDF
+# TF-IDF para preguntas
 vectorizer = TfidfVectorizer()
 X = vectorizer.fit_transform(preguntas)
 
-# Modelo de formulario
+# TF-IDF y modelo simulado para análisis de descripciones
+descripcion_ejemplos = [
+    "Realizaré prácticas en una empresa de desarrollo de software.",
+    "Participaré en una campaña de limpieza ambiental en mi comunidad.",
+    "Estoy trabajando como asistente en una empresa mientras estudio.",
+    "Me uniré a un proyecto social que ayuda a personas vulnerables.",
+    "Haré mis pasantías en el área de soporte técnico de una institución pública.",
+    "Trabajo medio tiempo como desarrollador en una startup."
+]
+
+areas = ["Desarrollo", "Vinculación", "Laboral", "Vinculación", "Redes", "Laboral"]
+vector_desc = TfidfVectorizer()
+X_desc = vector_desc.fit_transform(descripcion_ejemplos)
+modelo_area = LogisticRegression()
+modelo_area.fit(X_desc, areas)
+
+# Modelos
 class Formulario(BaseModel):
     nombre: str
     cedula: str
@@ -59,7 +77,6 @@ class Formulario(BaseModel):
     tipo_actividad: str
     descripcion: str
 
-# Modelo de mensaje
 class Pregunta(BaseModel):
     texto: str
 
@@ -70,6 +87,21 @@ def root():
 @app.post("/formulario/registro")
 async def registrar_formulario(data: Formulario):
     form_dict = data.dict()
+
+    # Predicción del análisis inteligente
+    desc_vec = vector_desc.transform([form_dict["descripcion"]])
+    area_predicha = modelo_area.predict(desc_vec)[0]
+    complejidad = "Avanzado" if "red" in form_dict["descripcion"].lower() or "snmp" in form_dict["descripcion"].lower() else "Intermedio"
+    modalidad_recomendada = "Convalidación" if complejidad == "Avanzado" else "Práctica Pre-Profesional"
+    probabilidad = round(random.uniform(70, 95), 2)
+
+    form_dict.update({
+        "area_profesional": area_predicha,
+        "complejidad": complejidad,
+        "modalidad_recomendada": modalidad_recomendada,
+        "probabilidad_aprobacion": probabilidad
+    })
+
     result = await formularios.insert_one(form_dict)
     form_dict["_id"] = str(result.inserted_id)
     return {"message": "Formulario recibido", "data": form_dict}
