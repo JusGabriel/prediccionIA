@@ -26,7 +26,7 @@ db = client.IA
 formularios = db.formularios
 pendientes = db.aprendizaje_formulario
 
-# Base de datos de preguntas frecuentes
+# Preguntas frecuentes
 preguntas = [
     "¿Cuántas horas necesito de prácticas laborales?",
     "¿Cuáles son los requisitos para convalidar prácticas?",
@@ -34,7 +34,7 @@ preguntas = [
     "¿Qué hago si ya tengo tutor para mis prácticas?",
     "¿Puedo hacer prácticas con familiares?",
     "¿Qué documentos debo enviar para el registro de prácticas?",
-    "¿Cuánto tiempo de validez tienen los certificados de prácticas?",
+    "¿Cuánto tiempo de validez tienen los certificados de prácticas?"
 ]
 
 respuestas = [
@@ -47,11 +47,11 @@ respuestas = [
     "Tienen una validez de 6 meses desde la fecha de finalización de las prácticas o de emisión del certificado."
 ]
 
-# TF-IDF para preguntas frecuentes
+# Entrenamiento TF-IDF para preguntas frecuentes
 vectorizer = TfidfVectorizer()
 X = vectorizer.fit_transform(preguntas)
 
-# Clasificación Modalidad: Entrenamiento de ejemplo
+# Entrenamiento TF-IDF para predicción de modalidad
 descripciones_modalidad = [
     "Voy a hacer prácticas en una empresa de telecomunicaciones.",
     "Realicé una capacitación en seguridad informática.",
@@ -79,7 +79,7 @@ X_modalidad = vector_modalidad.fit_transform(descripciones_modalidad)
 modelo_modalidad = LogisticRegression()
 modelo_modalidad.fit(X_modalidad, modalidades)
 
-# Modelos
+# Modelos de datos
 class Formulario(BaseModel):
     nombre: str
     cedula: str
@@ -91,6 +91,11 @@ class Formulario(BaseModel):
 class Pregunta(BaseModel):
     texto: str
 
+class ActividadSimple(BaseModel):
+    tipo_actividad: str
+    descripcion: str
+
+# Rutas
 @app.get("/")
 def root():
     return {"message": "Servidor de predicción de prácticas activo"}
@@ -98,13 +103,9 @@ def root():
 @app.post("/formulario/registro")
 async def registrar_formulario(data: Formulario):
     form_dict = data.dict()
-
-    # Predicción automática de modalidad
     desc_vec = vector_modalidad.transform([form_dict["descripcion"]])
     modalidad_predicha = modelo_modalidad.predict(desc_vec)[0]
     form_dict["modalidad_predicha"] = modalidad_predicha
-
-    # Insertar en MongoDB
     result = await formularios.insert_one(form_dict)
     form_dict["_id"] = str(result.inserted_id)
     return {"message": "Formulario recibido", "data": form_dict}
@@ -126,6 +127,16 @@ async def responder_pregunta(pregunta: Pregunta):
     return {
         "respuesta": respuestas[idx],
         "necesita_aprendizaje": False
+    }
+
+@app.post("/formulario/prediccion")
+async def predecir_modalidad(data: ActividadSimple):
+    desc_vec = vector_modalidad.transform([data.descripcion])
+    modalidad_predicha = modelo_modalidad.predict(desc_vec)[0]
+    return {
+        "modalidad_predicha": modalidad_predicha,
+        "descripcion": data.descripcion,
+        "tipo_actividad": data.tipo_actividad
     }
 
 @app.get("/formularios")
