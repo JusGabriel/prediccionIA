@@ -81,10 +81,10 @@ modelo_modalidad.fit(X_modalidad, modalidades)
 
 # Modelos de datos
 class Formulario(BaseModel):
-    nombre: str
-    cedula: str
-    carrera: str
-    modalidad: str
+    nombre: str = "Anonimo"
+    cedula: str = "0000000000"
+    carrera: str = "Sin especificar"
+    modalidad: str = "Desconocida"
     tipo_actividad: str
     descripcion: str
 
